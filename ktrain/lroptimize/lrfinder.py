@@ -137,6 +137,15 @@ class LRFinder:
                 verbose=verbose,
                 callbacks=[callback],
             )
+        elif isinstance(train_data, tf.data.Dataset):
+            self.model.fit(
+                train_data,
+                batch_size=batch_size,
+                epochs=epochs,
+                class_weight=class_weight,
+                verbose=verbose,
+                callbacks=[callback],
+            )
         else:
             self.model.fit(
                 train_data[0],

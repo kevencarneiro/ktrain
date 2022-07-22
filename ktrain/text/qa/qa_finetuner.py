@@ -1,7 +1,10 @@
 import warnings
+from collections.abc import Iterable
 
 import pandas as pd
 import tensorflow as tf
+
+import ktrain
 
 
 def convert_to_dataset(list_of_dicts):
@@ -13,6 +16,8 @@ def convert_to_dataset(list_of_dicts):
         )
 
     new_list = []
+    answer_texts = []
+    answer_start = []
     for d in list_of_dicts:
         if "question" not in d or "context" not in d or "answers" not in d:
             raise ValueError(
@@ -21,22 +26,26 @@ def convert_to_dataset(list_of_dicts):
         q = d["question"].strip()
         c = d["context"].strip()
         a = d["answers"].strip() if isinstance(d["answers"], str) else d["answers"]
-        if a is None:
-            answers = {"text": [], "answer_start": []}
-        elif isinstance(a, dict):
-            ans_start = a["answer_start"]
-            ans_text = a["text"]
-            answers = {"text": ans_text, "answer_start": ans_start}
-        elif isinstance(a, str):
-            ans_start = c.index(a)
-            if ans_start < 0:
-                raise ValueError("Could not locate answer in context: %s" % (d))
-            ans_start = [ans_start]
-            answers = {"text": [a], "answer_start": ans_start}
-        else:
-            raise ValueError(
-                'Value for "answers" key must be a string, dictionary, or None'
-            )
+        if a is not None:
+            if not isinstance(a, Iterable):
+                a = [a]
+            for answer in a:
+                if isinstance(answer, dict):
+                    ans_start = answer["answer_start"]
+                    ans_text = answer["text"]
+                    answer_texts.append(ans_text)
+                    answer_start.append(ans_start)
+                elif isinstance(answer, str):
+                    ans_start = c.index(answer)
+                    if ans_start < 0:
+                        raise ValueError("Could not locate answer in context: %s" % (d))
+                    answer_start.append(ans_start)
+                    answer_texts.append(answer)
+                else:
+                    raise ValueError(
+                        'Value for "answers" key must be a string, dictionary, or None'
+                    )
+        answers = {"text": answer_texts, "answer_start": answer_start}
         new_d = {"question": q, "context": c, "answers": answers}
         new_list.append(new_d)
     dataset = Dataset.from_pandas(pd.DataFrame(new_list))
@@ -140,11 +149,25 @@ class QAFineTuner:
             batch_size = len(data)
 
         model = self.model
+        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+
+        def dummy_loss(y_true, y_pred):
+            return tf.reduce_mean(y_pred)
+
+        # losses = {"loss": dummy_loss}
+        # model.compile(optimizer=optimizer, loss=model.loss)
+        model.compile(optimizer=optimizer)
+
+        training_dataset = self.prepare_dataset(data, batch_size=batch_size, max_seq_length=max_seq_length)
+        learner = ktrain.get_learner(model, train_data=training_dataset)
+        learner.lr_find()
+        model.fit(training_dataset, epochs=int(epochs))
+
+    def prepare_dataset(self, data, batch_size=8, max_seq_length=512):
         tokenizer = self.tokenizer
         question_column_name = "question"
         context_column_name = "context"
         answer_column_name = "answers"
-
         # Padding side determines if we do (question|context) or (context|question).
         pad_on_right = tokenizer.padding_side == "right"
 
@@ -215,8 +238,8 @@ class QAFineTuner:
 
                     # Detect if the answer is out of the span (in which case this feature is labeled with the CLS index).
                     if not (
-                        offsets[token_start_index][0] <= start_char
-                        and offsets[token_end_index][1] >= end_char
+                            offsets[token_start_index][0] <= start_char
+                            and offsets[token_end_index][1] >= end_char
                     ):
                         tokenized_examples["start_positions"].append(cls_index)
                         tokenized_examples["end_positions"].append(cls_index)
@@ -224,8 +247,8 @@ class QAFineTuner:
                         # Otherwise move the token_start_index and token_end_index to the two ends of the answer.
                         # Note: we could go after the last offset if the answer is the last word (edge case).
                         while (
-                            token_start_index < len(offsets)
-                            and offsets[token_start_index][0] <= start_char
+                                token_start_index < len(offsets)
+                                and offsets[token_start_index][0] <= start_char
                         ):
                             token_start_index += 1
                         tokenized_examples["start_positions"].append(
@@ -240,19 +263,11 @@ class QAFineTuner:
         dataset = convert_to_dataset(data)
         print(dataset)
         print(dataset[0])
-
         train_dataset = dataset.map(
             prepare_train_features,
             batched=True,
-            num_proc=1,
+            remove_columns=dataset.column_names
         )
-        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-
-        def dummy_loss(y_true, y_pred):
-            return tf.reduce_mean(y_pred)
-
-        losses = {"loss": dummy_loss}
-        model.compile(optimizer=optimizer, loss=losses)
 
         training_dataset = convert_dataset_for_tensorflow(
             train_dataset,
@@ -261,4 +276,4 @@ class QAFineTuner:
             drop_remainder=True,
             shuffle=True,
         )
-        model.fit(training_dataset, epochs=int(epochs))
+        return training_dataset

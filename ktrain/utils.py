@@ -308,8 +308,10 @@ def shape_from_data(data):
                 raise Exception(err_msg)
     else:
         try:
-            if type(data[0]) == list:  # BERT-style tuple
+            if type(data) == tuple and type(data[0]) == list:  # BERT-style tuple
                 return data[0][0].shape
+            elif isinstance(data, tf.data.Dataset):
+                return next(data.as_numpy_iterator())[0]['attention_mask'].shape
             else:
                 return data[0].shape  # standard tuple
         except:
@@ -337,8 +339,10 @@ def nsamples_from_data(data):
             raise Exception(err_msg)
     else:
         try:
-            if type(data[0]) == list:  # BERT-style tuple
+            if type(data) == tuple and type(data[0]) == list:  # BERT-style tuple
                 return len(data[0][0])
+            elif isinstance(data, tf.data.Dataset):
+                return len(data)
             else:
                 return len(data[0])  # standard tuple
         except:
@@ -409,13 +413,13 @@ def data_arg_check(
         raise ValueError("train_data is required")
     if val_required and val_data is None:
         raise ValueError("val_data is required")
-    if train_data is not None and not is_iter(train_data, ndarray_only):
+    if train_data is not None and not is_iter(train_data, ndarray_only) and not bert_data_tuple(train_data):
         if bad_data_tuple(train_data):
             err_msg = "data must be tuple of numpy.ndarrays"
             if not ndarray_only:
                 err_msg += " or an instance of ktrain.Dataset"
             raise ValueError(err_msg)
-    if val_data is not None and not is_iter(val_data, ndarray_only):
+    if val_data is not None and not is_iter(val_data, ndarray_only) and not bert_data_tuple(val_data):
         if bad_data_tuple(val_data):
             err_msg = "data must be tuple of numpy.ndarrays or BERT-style tuple"
             if not ndarray_only:
@@ -431,6 +435,11 @@ def bert_data_tuple(data):
     if is_iter(data):
         return False
     if (
+        isinstance(data, tf.data.Dataset) and
+        len(data.element_spec) == 2 and
+        'attention_mask' in data.element_spec[0] and
+        'input_ids' in data.element_spec[0]
+    ) or (
         type(data[0]) == list
         and len(data[0]) == 2
         and type(data[0][0]) is np.ndarray
@@ -449,10 +458,7 @@ def bad_data_tuple(data):
     """
     if (
         not isinstance(data, tuple)
-        or len(data) != 2
-        or type(data[0]) not in [np.ndarray, list]
-        or (type(data[0]) in [list] and type(data[0][0]) is not np.ndarray)
-        or type(data[1]) is not np.ndarray
+        or not bert_data_tuple(data)
     ):
         return True
     else:

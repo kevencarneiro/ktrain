@@ -353,7 +353,7 @@ class Learner(ABC):
         elif not os.path.exists(fpath):
             os.makedirs(fpath)
 
-    def save_model(self, fpath):
+    def save_model(self, fpath, save_format='h5'):
         """
         ```
         a wrapper to model.save
@@ -364,7 +364,8 @@ class Learner(ABC):
         ```
         """
         self._make_model_folder(fpath)
-        self.model.save(os.path.join(fpath, U.MODEL_NAME), save_format="h5")
+        model_name = U.MODEL_BASENAME + "." + save_format
+        self.model.save(os.path.join(fpath, model_name), save_format='tf')
         return
 
     def load_model(self, fpath, custom_objects=None, **kwargs):
@@ -588,7 +589,7 @@ class Learner(ABC):
             self.model.save_weights(weightfile)
         else:
             temp_folder = tempfile.mkdtemp()
-            self.save_model(temp_folder)
+            self.save_model(temp_folder, save_format='tf')
 
         # compute steps_per_epoch
         num_samples = U.nsamples_from_data(self.train_data)
