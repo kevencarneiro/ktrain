@@ -368,7 +368,7 @@ class Learner(ABC):
         self.model.save(os.path.join(fpath, model_name), save_format='tf')
         return
 
-    def load_model(self, fpath, custom_objects=None, **kwargs):
+    def load_model(self, fpath, custom_objects=None, model_format='h5', **kwargs):
         """
         ```
         loads model from folder.
@@ -382,7 +382,7 @@ class Learner(ABC):
         ```
         """
         self.model = _load_model(
-            fpath, train_data=self.train_data, custom_objects=custom_objects
+            fpath, train_data=self.train_data, custom_objects=custom_objects, model_format=model_format
         )
         return
 
@@ -584,12 +584,14 @@ class Learner(ABC):
         # save current weights and temporarily restore original weights
         # dep_fix: temporarily use save_model instead of save_weights as default due to https://github.com/tensorflow/tensorflow/issues/41116
         _weights_only = True
+        model_format = self.model
         if restore_weights_only:
             new_file, weightfile = tempfile.mkstemp()
             self.model.save_weights(weightfile)
         else:
             temp_folder = tempfile.mkdtemp()
             self.save_model(temp_folder, save_format='tf')
+            self.load_model(temp_folder, model_format='tf')
 
         # compute steps_per_epoch
         num_samples = U.nsamples_from_data(self.train_data)
@@ -632,7 +634,7 @@ class Learner(ABC):
         except KeyboardInterrupt:
             # re-load current weights
             # self.model.load_weights(weightfile)
-            self.load_model(temp_folder)
+            self.load_model(temp_folder, model_format='tf')
             return
 
         # re-load current weights
@@ -640,7 +642,7 @@ class Learner(ABC):
         if restore_weights_only:
             self.model.load_weights(weightfile)
         else:
-            self.load_model(temp_folder)
+            self.load_model(temp_folder, model_format='tf')
 
         # instructions to invoker
         U.vprint("\n", verbose=verbose)
@@ -1915,7 +1917,7 @@ def release_gpu_memory(device=0):
     return
 
 
-def _load_model(fpath, preproc=None, train_data=None, custom_objects=None):
+def _load_model(fpath, preproc=None, train_data=None, custom_objects=None, model_format='h5'):
     if not preproc and not train_data:
         raise ValueError("Either preproc or train_data is required.")
     if (preproc and isinstance(preproc, TransformersPreprocessor)) or (
@@ -2026,9 +2028,9 @@ def _load_model(fpath, preproc=None, train_data=None, custom_objects=None):
     try:
         try:
             model = keras.models.load_model(
-                os.path.join(fpath, U.MODEL_NAME), custom_objects=custom_objects
+                os.path.join(fpath, U.MODEL_BASENAME + "." + model_format), custom_objects=custom_objects
             )
-        except:
+        except IOError:
             try:
                 # pre-0.16: model fpath was file name of model not folder for non-Transformer models
                 # warnings.warn('could not load model as %s - attempting to load model as %s' % (os.path.join(fpath, U.MODEL_NAME), fpath))

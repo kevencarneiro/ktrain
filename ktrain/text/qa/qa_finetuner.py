@@ -155,11 +155,11 @@ class QAFineTuner:
             return tf.reduce_mean(y_pred)
 
         # losses = {"loss": dummy_loss}
-        # model.compile(optimizer=optimizer, loss=model.loss)
-        model.compile(optimizer=optimizer)
+        model.compile(optimizer=optimizer, loss=dummy_loss)
 
         training_dataset = self.prepare_dataset(data, batch_size=batch_size, max_seq_length=max_seq_length)
-        learner = ktrain.get_learner(model, train_data=training_dataset)
+        model.compile(optimizer=optimizer)
+        learner = ktrain.get_learner(model, train_data=training_dataset, batch_size=batch_size)
         learner.lr_find()
         model.fit(training_dataset, epochs=int(epochs))
 
