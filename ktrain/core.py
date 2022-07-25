@@ -1,3 +1,5 @@
+from transformers import AutoModel, TFAutoModel
+
 from . import utils as U
 from .graph.predictor import LinkPredictor, NodePredictor
 from .graph.preprocessor import LinkPreprocessor, NodePreprocessor
@@ -353,7 +355,7 @@ class Learner(ABC):
         elif not os.path.exists(fpath):
             os.makedirs(fpath)
 
-    def save_model(self, fpath, save_format='h5'):
+    def save_model(self, fpath, model_format='h5'):
         """
         ```
         a wrapper to model.save
@@ -363,10 +365,12 @@ class Learner(ABC):
           None
         ```
         """
-        self._make_model_folder(fpath)
-        model_name = U.MODEL_BASENAME + "." + save_format
-        self.model.save(os.path.join(fpath, model_name), save_format='tf')
-        return
+        if model_format == 'hf':
+            self.model.save_pretrained(fpath)
+        else:
+            self._make_model_folder(fpath)
+            model_name = U.MODEL_BASENAME + "." + model_format
+            self.model.save(os.path.join(fpath, model_name), save_format=model_format)
 
     def load_model(self, fpath, custom_objects=None, model_format='h5', **kwargs):
         """
@@ -381,10 +385,15 @@ class Learner(ABC):
 
         ```
         """
-        self.model = _load_model(
-            fpath, train_data=self.train_data, custom_objects=custom_objects, model_format=model_format
-        )
-        return
+        if model_format == 'hf':
+            try:
+                self.model = AutoModel.from_pretrained(fpath)
+            except:
+                self.model = TFAutoModel.from_pretrained(fpath)
+        else:
+            self.model = _load_model(
+                fpath, train_data=self.train_data, custom_objects=custom_objects, model_format=model_format
+            )
 
     def _is_adamlike(self):
         """
@@ -584,14 +593,15 @@ class Learner(ABC):
         # save current weights and temporarily restore original weights
         # dep_fix: temporarily use save_model instead of save_weights as default due to https://github.com/tensorflow/tensorflow/issues/41116
         _weights_only = True
-        model_format = self.model
+        model_format = 'hf' if hasattr(self.model, 'save_pretrained') else 'tf'
         if restore_weights_only:
             new_file, weightfile = tempfile.mkstemp()
             self.model.save_weights(weightfile)
         else:
             temp_folder = tempfile.mkdtemp()
-            self.save_model(temp_folder, save_format='tf')
-            self.load_model(temp_folder, model_format='tf')
+
+            self.save_model(temp_folder, model_format=model_format)
+            # self.load_model(temp_folder, model_format=model_format)
 
         # compute steps_per_epoch
         num_samples = U.nsamples_from_data(self.train_data)
@@ -634,7 +644,7 @@ class Learner(ABC):
         except KeyboardInterrupt:
             # re-load current weights
             # self.model.load_weights(weightfile)
-            self.load_model(temp_folder, model_format='tf')
+            self.load_model(temp_folder, model_format=model_format)
             return
 
         # re-load current weights
@@ -642,7 +652,7 @@ class Learner(ABC):
         if restore_weights_only:
             self.model.load_weights(weightfile)
         else:
-            self.load_model(temp_folder, model_format='tf')
+            self.load_model(temp_folder, model_format=model_format)
 
         # instructions to invoker
         U.vprint("\n", verbose=verbose)
