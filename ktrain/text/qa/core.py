@@ -9,6 +9,7 @@ from whoosh import index, qparser
 from whoosh.fields import *
 from whoosh.qparser import QueryParser
 
+from . import squad_metrics
 from ... import utils as U
 from ...imports import *
 from ...torch_base import TorchBase
@@ -190,7 +191,7 @@ class QA(ABC, TorchBase):
     def search(self, query):
         pass
 
-    def predict_squad(self, documents, question):
+    def predict_squad(self, documents, question, max_answers=20):
         """
         Generates candidate answers to the <question> provided given <documents> as contexts.
         """
@@ -239,42 +240,54 @@ class QA(ABC, TorchBase):
         # normalize logits and spans to retrieve the answer
         # start_scores = np.exp(start_scores - np.log(np.sum(np.exp(start_scores), axis=-1, keepdims=True))) # from HF pipeline
         # end_scores = np.exp(end_scores - np.log(np.sum(np.exp(end_scores), axis=-1, keepdims=True)))             # from HF pipeline
-        answer_starts = np.argmax(start_scores, axis=1)
-        answer_ends = np.argmax(end_scores, axis=1)
+        answer_starts = np.argsort(start_scores, axis=1)
+        answer_ends = np.argsort(end_scores, axis=1)
 
         answers = []
         for i, tokens in enumerate(tokens_batch):
-            answer_start = answer_starts[i]
-            answer_end = answer_ends[i]
-            answer = self._reconstruct_text(tokens, answer_start, answer_end + 2)
-            if answer.startswith(". ") or answer.startswith(", "):
-                answer = answer[2:]
-            sep_index = tokens.index("[SEP]")
-            full_txt_tokens = tokens[sep_index + 1 :]
-            paragraph_bert = self._reconstruct_text(full_txt_tokens)
+            for j in range(1, min(max_answers, len(answer_starts[i])) + 1):
+                answer_start = answer_starts[i][-j]
+                answer_end = answer_ends[i][-j]
+                answer = self._reconstruct_text(tokens, answer_start, answer_end + 2)
+                if answer.startswith(". ") or answer.startswith(", "):
+                    answer = answer[2:]
+                sep_index = tokens.index("[SEP]")
+                full_txt_tokens = tokens[sep_index + 1 :]
+                paragraph_bert = self._reconstruct_text(full_txt_tokens)
 
-            ans = {}
-            ans["answer"] = answer
-            if (
-                answer.startswith("[CLS]")
-                or answer_end < sep_index
-                or answer.endswith("[SEP]")
-            ):
-                ans["confidence"] = LOWCONF
-            else:
-                # confidence = torch.max(start_scores) + torch.max(end_scores)
-                # confidence = np.log(confidence.item())
-                # ans['confidence'] = start_scores[i,answer_start]*end_scores[i,answer_end]
-                ans["confidence"] = (
-                    start_scores[i, answer_start] + end_scores[i, answer_end]
-                )
+                ans = {}
+                ans["answer"] = answer
+                if (
+                    answer.startswith("[CLS]")
+                    or answer_end < sep_index
+                    or answer.endswith("[SEP]")
+                ):
+                    ans["confidence"] = LOWCONF
+                else:
+                    # confidence = torch.max(start_scores) + torch.max(end_scores)
+                    # confidence = np.log(confidence.item())
+                    # ans['confidence'] = start_scores[i,answer_start]*end_scores[i,answer_end]
+                    ans["confidence"] = (
+                        start_scores[i, answer_start] + end_scores[i, answer_end]
+                    )
 
-            ans["start"] = answer_start
-            ans["end"] = answer_end
-            ans["context"] = paragraph_bert
-            answers.append(ans)
+                ans["start"] = answer_start
+                ans["end"] = answer_end
+                ans["context"] = paragraph_bert
+                answers.append(ans)
         # if len(answers) == 1: answers = answers[0]
         return answers
+
+    def evaluate_squad(self, test_data):
+        true_answers = []
+        predicted_answers = []
+        for item in test_data:
+            predicted_answers.append(item['answers'])
+            predictions = self.predict_squad(item['context'], item['question'])
+            predicted_answers.append([p['answer'] for p in predictions])
+
+        results = squad_metrics.squad_evaluate(true_answers, predicted_answers)
+        return results
 
     def _clean_answer(self, answer):
         import string

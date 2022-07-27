@@ -1,4 +1,5 @@
 import os
+import pickle
 
 import re
 
@@ -70,14 +71,6 @@ df['Pergunta'] = df['Pergunta'].apply(format_string)
 df['Resposta'] = df['Resposta'].apply(format_string)
 
 questions = []
-# for row_idx, row in df.iterrows():
-#     titulo = row['Título']
-#     secao = row['Seção']
-#     contexto = row['Contexto']
-#     pergunta = row['Pergunta']
-#     resposta = row['Resposta']
-#
-#     questions.append({'question': pergunta, 'context': contexto, 'answers': resposta})
 
 for keys, values in df.groupby(['Contexto', 'Pergunta']):
     questions.append({
@@ -86,10 +79,9 @@ for keys, values in df.groupby(['Contexto', 'Pergunta']):
         'answers': values['Resposta'].values
     })
 
-
-
-
 ae = AnswerExtractor(BERT_EMB_MODEL)
-ae.finetune(data=questions, epochs=20, batch_size=4)
+ae.finetune(data=questions, epochs=1, batch_size=4)
+
+ae.qa.evaluate_squad(questions)
 
 ae.qa.predict_squad(documents=questions[0]['context'], question=questions[0]['question'])

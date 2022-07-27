@@ -156,9 +156,9 @@ class QAFineTuner:
 
         training_dataset = self.prepare_dataset(data, batch_size=batch_size, max_seq_length=max_seq_length)
         model.compile(optimizer=optimizer)
-        learner = ktrain.get_learner(model, train_data=training_dataset, batch_size=batch_size)
-        learner.lr_find()
-        learner.lr_plot()
+        # learner = ktrain.get_learner(model, train_data=training_dataset, batch_size=batch_size)
+        # learner.lr_find()
+        # learner.lr_plot()
         model.fit(training_dataset, epochs=int(epochs))
 
     def prepare_dataset(self, data, batch_size=8, max_seq_length=512):
