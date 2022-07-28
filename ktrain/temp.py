@@ -4,6 +4,8 @@ import pickle
 import re
 
 import pandas as pd
+from sklearn.model_selection import train_test_split
+
 from ktrain.text import AnswerExtractor
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -67,8 +69,11 @@ def format_string(string: str):
 df['Título'] = df['Título'].apply(format_string)
 df['Seção'] = df['Seção'].apply(format_string)
 df['Contexto'] = df['Contexto'].apply(format_string)
-df['Pergunta'] = df['Pergunta'].apply(format_string)
+df['Pergunta'] = df['Pergunta'].apply(format_string).astype('category')
 df['Resposta'] = df['Resposta'].apply(format_string)
+
+df = df[df['Pergunta'].astype(bool)]
+df = df[df['Contexto'].astype(bool)]
 
 questions = []
 
@@ -79,9 +84,12 @@ for keys, values in df.groupby(['Contexto', 'Pergunta']):
         'answers': values['Resposta'].values
     })
 
-ae = AnswerExtractor(BERT_EMB_MODEL)
-ae.finetune(data=questions, epochs=1, batch_size=4)
+train_questions, test_questions = train_test_split(questions, stratify=[q['question'] for q in questions], random_state=42)
 
-ae.qa.evaluate_squad(questions)
+ae = AnswerExtractor(BERT_EMB_MODEL)
+ae.finetune(data=train_questions, epochs=8, batch_size=8, learning_rate=3e-5)
+
+evaluation_results = ae.qa.evaluate_squad(test_questions)
+print(evaluation_results)
 
 ae.qa.predict_squad(documents=questions[0]['context'], question=questions[0]['question'])

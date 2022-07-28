@@ -281,8 +281,9 @@ class QA(ABC, TorchBase):
     def evaluate_squad(self, test_data):
         true_answers = []
         predicted_answers = []
+
         for item in test_data:
-            predicted_answers.append(item['answers'])
+            true_answers.append(item['answers'])
             predictions = self.predict_squad(item['context'], item['question'])
             predicted_answers.append([p['answer'] for p in predictions])
 
